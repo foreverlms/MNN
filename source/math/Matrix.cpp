@@ -364,7 +364,7 @@ void Matrix::print(const Tensor* C, const char* head) {
 
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            MNN_PRINT("%.7f\t", c[x + y * stride]);
+            MNN_PRINT("%.7f\t,", c[x + y * stride]);
         }
         MNN_PRINT("\n");
     }

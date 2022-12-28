@@ -25,14 +25,14 @@ set(CMAKE_MODULE_PATH
         ${CMAKE_MODULE_PATH}
         "${CMAKE_CURRENT_LIST_DIR}/cmake"
         )
-#add_custom_command(OUTPUT "${CMAKE_CURRENT_LIST_DIR}/include/MNN/VCS.h"
-#    COMMAND ${CMAKE_COMMAND} "-DNAMES=MNN"
-#    "-DMNN_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
-#    "-DHEADER_FILE=${CMAKE_CURRENT_LIST_DIR}/include/MNN/VCS.h"
-#    -P "${CMAKE_CURRENT_LIST_DIR}/cmake/GenerateVersionFromVCS.cmake"
-#    COMMENT "Generating Version Control Info"
-#)
-#add_custom_target (GenVCSHDR DEPENDS "${CMAKE_CURRENT_LIST_DIR}/include/MNN/VCS.h")
+add_custom_command(OUTPUT "${CMAKE_CURRENT_LIST_DIR}/include/MNN/VCS.h"
+        COMMAND ${CMAKE_COMMAND} "-DNAMES=MNN"
+        "-DMNN_SOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}"
+        "-DHEADER_FILE=${CMAKE_CURRENT_LIST_DIR}/include/MNN/VCS.h"
+        -P "${CMAKE_CURRENT_LIST_DIR}/cmake/GenerateVersionFromVCS.cmake"
+        COMMENT "Generating Version Control Info"
+        )
+add_custom_target(GenVCSHDR DEPENDS "${CMAKE_CURRENT_LIST_DIR}/include/MNN/VCS.h")
 # Required for OpenCL/OpenGL/Vulkan CodeGen
 include(FindPythonInterp REQUIRED)
 # build options
@@ -60,7 +60,7 @@ option(NATIVE_INCLUDE_OUTPUT "Native Include Path" OFF)
 option(MNN_AAPL_FMWK "Build MNN.framework instead of traditional .a/.dylib" OFF)
 option(MNN_WITH_PLUGIN "Build with plugin op support." OFF)
 option(MNN_BUILD_MINI "Build MNN-MINI that just supports fixed shape models." OFF)
-option(MNN_USE_SSE "Use SSE optimization for x86 if possiable" ON)
+option(MNN_USE_SSE "Use SSE optimization for x86 if possiable" OFF)
 option(MNN_BUILD_CODEGEN "Build with codegen" OFF)
 option(MNN_ENABLE_COVERAGE "Build with coverage enable" OFF)
 option(MNN_BUILD_PROTOBUFFER "Build with protobuffer in MNN" ON)
@@ -798,6 +798,6 @@ if (MNN_JNI)
 endif()
 
 FILE(GLOB lms_src ${CMAKE_CURRENT_LIST_DIR}/test/lms*.cpp)
-add_executable(RunMNN ${lms_src})
+add_executable(RunMNN ${lms_src}  ${CMAKE_CURRENT_LIST_DIR}/test/entrance.cpp)
 target_include_directories(RunMNN PRIVATE ${CMAKE_CURRENT_LIST_DIR}/test/)
-target_link_libraries(RunMNN MNN)
+target_link_libraries(RunMNN PUBLIC ${MNN_DEPS})

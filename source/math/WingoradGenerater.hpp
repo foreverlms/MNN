@@ -33,7 +33,7 @@ public:
     std::shared_ptr<Tensor> allocTransformWeight(const Tensor* originWeight, int unitCi = 4, int unitCo = 4, bool alloc = true);
     void transformWeight(const Tensor* dest, const Tensor* source, bool ciFirst = false);
 
-private:
+  public:
     std::shared_ptr<Tensor> mA, mA_Right;
     std::shared_ptr<Tensor> mG, mG_Right;
     std::shared_ptr<Tensor> mB;

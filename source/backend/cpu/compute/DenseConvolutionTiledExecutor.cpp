@@ -198,6 +198,7 @@ PerfConfig DenseConvolutionTiledImpl::bestTileConvolutionConfig(const Convolutio
     auto oC4           = UP_DIV(outputChannel, unit);
 
      //In next major version these would be read from microbenchmark result file.
+    // lms: 通过roofline模型确定参数
      constexpr int roofLine = 20;
      constexpr int indexCalculate = 3000;
      constexpr int indexMem = 40;

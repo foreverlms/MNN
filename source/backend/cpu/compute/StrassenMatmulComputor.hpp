@@ -13,9 +13,10 @@
 #include "core/Backend.hpp"
 namespace MNN {
 /**
+ * https://arxiv.org/abs/0707.2347
  Based on
  Boyer, B., Dumas, J.-G., Pernet, C., & Zhou, W. (2007). Memory efficient scheduling of Strassen-Winogradʼs matrix multiplication algorithm. Proceedings of the 2009 international symposium on Symbolic and algebraic computation ISSAC 09, 55. ACM Press. Retrieved from http://arxiv.org/abs/0707.2347
- 
+
  Use Table 2
  */
 class StrassenMatrixComputor {
@@ -37,13 +38,13 @@ public:
         CO can be the same same as C or broadcast in lenght(1): hC4, e, P or hC4, 1, P
      }
      Compute: C = alpha * AB + beta * CO , alpha must be 1.0f
-     
+
      postParameters:
      0: alpha
      1: beta
      2: min
      3: max
-     
+
      if (postParameters.empty()) {
         alpha = 1.0f
         beta = 0.0f;
@@ -78,7 +79,7 @@ private:
     bool mSupportMultiThread;
 
     Backend* mBackend;
-    
+
     std::vector<uint8_t*> mStack;
 };
 } // namespace MNN

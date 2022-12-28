@@ -1,3 +1,4 @@
+#include "lms_source.hpp"
 #include <MNN/Interpreter.hpp>
 #include <fstream>
 #include <iostream>
@@ -44,7 +45,7 @@ std::shared_ptr<char> ReadBinaryFile(const std::string &filePath, size_t &size)
 
 bool test_quality()
 {
-    std::string modelPath = "/Users/bob/docs/ByteDance/PNN/converter/deepfm/trival_deep_fm.mnn";
+    std::string modelPath = "/Users/bob/code/CodeReading/mnn/MNN/cmake-build-debug/conv1x1.mnn";
     std::string inputPath = "/Users/bob/docs/ByteDance/PNN/converter/quality/onnx_input.bin";
     std::string outputPath = "/Users/bob/docs/ByteDance/PNN/converter/quality/onnx_output.bin";
     std::string upsampleOutputPath = "/Users/bob/docs/ByteDance/PNN/converter/quality/upsample_output.bin";
@@ -66,6 +67,9 @@ bool test_quality()
     }
     MNN::ScheduleConfig cpuconfig;
     cpuconfig.type = MNN_FORWARD_CPU;
+    MNN::BackendConfig backendConfig;
+    backendConfig.memory = MNN::BackendConfig::Memory_High;
+    cpuconfig.backendConfig = &backendConfig;
     auto CPU = net->createSession(cpuconfig);
 
     // multiple inputs
@@ -95,44 +99,26 @@ bool test_quality()
     net->runSession(CPU);
     PROGRAM_END
 
-    auto output = net->getSessionOutput(CPU, "prediction");
+    auto output = net->getSessionOutput(CPU, "output");
     auto outputTensor = new MNN::Tensor(output, MNN::Tensor::CAFFE);
     output->copyToHostTensor(outputTensor);
 
-//    auto upsample = net->getSessionOutput(CPU, "644");
-//    auto upsampleOutput = new MNN::Tensor(upsample, MNN::Tensor::CAFFE);
-//    upsample->copyToHostTensor(upsampleOutput);
+    //    auto upsample = net->getSessionOutput(CPU, "644");
+    //    auto upsampleOutput = new MNN::Tensor(upsample, MNN::Tensor::CAFFE);
+    //    upsample->copyToHostTensor(upsampleOutput);
 
     float tolerance = 0.08;
 
-    //    const auto *upsamplePtr = upsampleOutput->host<float>();
-    //    for (int i = 0; i < upsampleOutput->size(); ++i)
+    //    const auto *ptr = outputTensor->host<float>();
+    //    for (int i = 0; i < outputTensor->size(); ++i)
     //    {
-    //
-    //        auto diff = std::abs(upsamplePtr[i] - upsampleData[i]) / upsampleData[i];
+    //        auto diff = std::abs(ptr[i] - realData[i]) / realData[i];
     //        if (diff > tolerance)
     //        {
-    //            std::cout << "Upsample Index: " << i << ",Computed: " << upsamplePtr[i] << ", Real: " << upsampleData[i] << std::endl;
+    //            std::cout << "Index: " << i << ",Computed: " << ptr[i] << ", Real: " << realData[i] << std::endl;
     //            assert(false);
     //        }
     //    }
-    //    delete upsampleOutput;
-
-    const auto *ptr = outputTensor->host<float>();
-    for (int i = 0; i < outputTensor->size(); ++i)
-    {
-        auto diff = std::abs(ptr[i] - realData[i]) / realData[i];
-        if (diff > tolerance)
-        {
-            std::cout << "Index: " << i << ",Computed: " << ptr[i] << ", Real: " << realData[i] << std::endl;
-            assert(false);
-        }
-    }
     delete outputTensor;
 }
 } // namespace lms
-
-int main(void)
-{
-    lms::test_quality();
-}

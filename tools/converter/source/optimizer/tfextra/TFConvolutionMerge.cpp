@@ -10,6 +10,7 @@
 #include "MNN_generated.h"
 #include "TFExtraManager.hpp"
 #include "core/OpCommonUtils.hpp"
+#include <iostream>
 
 namespace MNN {
 namespace Express {
@@ -49,6 +50,7 @@ class ConvolutionTransform : public TFExtraManager::Transform {
 public:
     virtual EXPRP onExecute(EXPRP expr) const override {
         auto op               = expr->get();
+        std::cout << op->name() << std::endl;
         auto inputs           = expr->inputs();
         auto weight           = inputs[1];
         auto weightInfo       = weight->getInfo();

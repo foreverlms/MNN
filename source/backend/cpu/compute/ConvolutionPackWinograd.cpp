@@ -16,6 +16,7 @@
 #include "math/WingoradGenerater.hpp"
 #include <MNN/AutoTime.hpp>
 #include "common/MemoryFormater.h"
+#include "iostream"
 #ifdef MNN_USE_NEON
 #include <arm_neon.h>
 #endif
@@ -53,6 +54,30 @@ ConvolutionPackWinograd::ConvolutionPackWinograd(const Convolution2DCommon *conv
     auto kernelSize = mCommon->kernelY();
     WinogradGenerater generator(unit, kernelSize, 1, true);
 
+//    auto lms_A = generator.A();
+//    auto lms_B = generator.B();
+//    auto lms_G = generator.G();
+//
+//    auto lms_BT = MNN::Math::Matrix::create(lms_B->buffer().dim[0].extent, lms_B->buffer().dim[1].extent);
+//    auto lms_AT = MNN::Math::Matrix::create(lms_A->buffer().dim[0].extent, lms_A->buffer().dim[1].extent);
+//    auto lms_GT = MNN::Math::Matrix::create(lms_G->buffer().dim[0].extent, lms_G->buffer().dim[1].extent);
+//
+//    MNN::Math::Matrix::transpose(lms_BT,lms_B.get());
+//    MNN::Math::Matrix::transpose(lms_AT,lms_A.get());
+//    MNN::Math::Matrix::transpose(lms_GT,lms_G.get());
+//
+//    MNN_PRINT("A=\n");
+//    MNN::Math::Matrix::print(lms_AT );
+//    MNN_PRINT("G=\n");
+//    MNN::Math::Matrix::print(lms_G.get());
+//    MNN_PRINT("GT=\n");
+//    MNN::Math::Matrix::print(lms_GT);
+//
+//    MNN_PRINT("B=\n");
+//    MNN::Math::Matrix::print(lms_BT);
+//    MNN_PRINT("mGRight=\n");
+//    MNN::Math::Matrix::print(generator.mG_Right.get());
+    // epack: tileSize
     int ePack, hPack, lPack;
     core->MNNGetMatMulPackMode(&ePack, &lPack, &hPack);
 
@@ -60,13 +85,15 @@ ConvolutionPackWinograd::ConvolutionPackWinograd(const Convolution2DCommon *conv
     int alpha2       = alpha * alpha;
     mSourceTransformPack = core->chooseWinoSourceTransformPack(alpha, alpha, ePack, lPack, pack);
     mSourceUnrollTransform =  core->chooseWinoSourceUnrollTransform(alpha, alpha);
+    MNN_PRINT("Find Dest Func\n");
     core->chooseWinoDestUnrollTransform(mDestUnrollTransform.get(), CONVOLUTION_WINOGRAD_MAX_UNIT + 1, alpha, unit);
 
     int srcCount                       = input->channel();
     int outputCount                    = output->channel();
     auto ic4 = UP_DIV(srcCount, pack);
     auto oc4 = UP_DIV(outputCount, pack);
-    mTempBuffer.reset(Tensor::createDevice<uint8_t>({threadNumber, ePack, ic4 + oc4, pack * alpha2, bytes}));
+    //lms: https://no5-aaron-wu.github.io/2021/11/16/AI-Algorithm-5-WinogradInMnn/
+    mTempBuffer.reset(Tensor::createDevice<uint8_t>({threadNumber, ePack, ic4 + oc4, pack * alpha2, bytes})); //最后的bytes表明float类型，用于存储输入和输出变换的数据
     // mTransformMidBuffer.reset(Tensor::createDevice<uint8_t>({threadNumber, 2, alpha2, pack, bytes}));
     // mGemmMidBuffer.reset(Tensor::createDevice<uint8_t>({threadNumber, ePack * UP_DIV(srcCount, lPack) * lPack, bytes}));
 
@@ -132,7 +159,7 @@ ErrorCode ConvolutionPackWinograd::onExecute(const std::vector<Tensor *> &inputs
     auto input   = inputs[0];
     auto output  = outputs[0];
     auto dstUnit = mA->length(1); // m
-    auto srcUnit = mA->length(0); // n
+    auto srcUnit = mA->length(0); // m + r -1
     int ePack, lPack, hPack;
     core->MNNGetMatMulPackMode(&ePack, &lPack, &hPack);
 
@@ -155,10 +182,10 @@ ErrorCode ConvolutionPackWinograd::onExecute(const std::vector<Tensor *> &inputs
     auto wUnit = UP_DIV(ow, dstUnit); // ow / m
     auto hUnit = UP_DIV(oh, dstUnit); // oh / m
 
-    auto totalCount   = wUnit * hUnit * batch;
+    auto totalCount   = wUnit * hUnit * batch; // 一共totalCount个输入分块
     // MNN_PRINT("ow=%d, oh=%d\n", ow, oh);
     int threadNumber = std::max(((CPUBackend *)backend())->threadNumber(), 1);
-    int tileCount    = UP_DIV(totalCount, ePack);
+    int tileCount    = UP_DIV(totalCount, ePack); // 一次计算ePack个分块的输入与权重的乘法，输出对应ePack个结果，总共tileCount次
     int eRemain = totalCount % ePack;
     threadNumber     = std::min(threadNumber, tileCount);
     std::vector<size_t> parameters(6);
@@ -187,12 +214,13 @@ ErrorCode ConvolutionPackWinograd::onExecute(const std::vector<Tensor *> &inputs
     auto bias      = mResource->mBias->host<uint8_t>();
 
     auto tFunction = [&](int tId) {
+        // tempBuffer: [ePack, ic4, pack * alpha2, bytes]
         auto _srcOrigin = mTempBuffer->host<uint8_t>() + tId * mTempBuffer->stride(0);
         auto gemmBuffer = (mGemmMidBuffer->host<uint8_t>() + tId * mGemmMidBuffer->stride(0));
         auto midBuffer0 = mTransformMidBuffer->host<uint8_t>() + tId * mTransformMidBuffer->stride(0);
         auto midBuffer1 = midBuffer0 + midBuffer0Bytes;
         for (int tIndex = (int)tId; tIndex < tileCount; tIndex += threadNumber) {
-            int xIndex  = (int)tIndex * ePack;
+            int xIndex  = (int)tIndex * ePack; // 当前tile在totalCount的序号，第几个tile。每个tile ePack个块
             int xReamin = totalCount - xIndex;
             int xC      = xReamin > ePack ? ePack : xReamin;
 
@@ -201,15 +229,15 @@ ErrorCode ConvolutionPackWinograd::onExecute(const std::vector<Tensor *> &inputs
 #ifndef MNN_WINO_TRANFORM_TEST_CLOSE
             {
                 int sourceZStep = iw * ih * batch * pack;
-                int oyBegin = xIndex / wUnit;
-                int oxBegin = xIndex % wUnit;
+                int oyBegin = xIndex / wUnit; // batch * H
+                int oxBegin = xIndex % wUnit; // 快的横坐标
                 int oyEnd = (xIndex + xC-1) / wUnit;
                 int remain = xC;
                 int destSOffset = 0;
                 if (fuseTransformPack) {
                     for (int hbIndex=oyBegin; hbIndex <= oyEnd; ++hbIndex) {
-                        int hIndex = hbIndex % hUnit;
-                        int bIndex = hbIndex / hUnit;
+                        int hIndex = hbIndex % hUnit; // 块纵坐标
+                        int bIndex = hbIndex / hUnit; // batch 序号
                         int step = std::min(wUnit - oxBegin, remain);
                         int srcY  = hIndex * dstUnit - padY;
                         int ey    = ALIMIN(srcY + srcUnit, ih) - srcY;
@@ -261,28 +289,27 @@ ErrorCode ConvolutionPackWinograd::onExecute(const std::vector<Tensor *> &inputs
                         int bIndex = hbIndex / hUnit;
                         int step = std::min(wUnit - oxBegin, remain);
                         int srcY  = hIndex * dstUnit - padY;
-                        int ey    = ALIMIN(srcY + srcUnit, ih) - srcY; //h dim pack element length
-                        int sy    = ALIMAX(0, srcY) - srcY;  // first y element
+                        int ey    = ALIMIN(srcY + srcUnit, ih) - srcY; //h dim pack element length. padB
+                        int sy    = ALIMAX(0, srcY) - srcY;  // first y element padP
                         for (int si=0; si<step; ++si) {
                             auto wIndex = si + oxBegin;
                             int srcX  = wIndex * dstUnit - padX;
-                            int sx    = ALIMAX(0, srcX) - srcX;
-                            int ex    = ALIMIN(srcX + srcUnit, iw) - srcX;
+                            int sx    = ALIMAX(0, srcX) - srcX; // padL
+                            int ex    = ALIMIN(srcX + srcUnit, iw) - srcX; // padR
                             int count = pack * (ex - sx);
 
                             auto srcStart = srcOrigin + (srcX + srcY * iw + bIndex * iw * ih) * pack * bytes;
-                            auto dst_x = _srcOrigin + destSOffset;
-                            if (ex - sx == srcUnit && ey - sy == srcUnit) {
+                            auto dst_x = _srcOrigin + destSOffset; // 存放中间变换，输入
+                            if (ex - sx == srcUnit && ey - sy == srcUnit) { // 不存在pad
                                 for (int z = 0; z < ic_4; ++z) {
                                     auto srcZ = srcStart + z * sourceZStep * bytes;
                                     // Transform
-
                                     auto dstZ = dst_x + z * dstZStep * bytes;
-                                    mSourceUnrollTransform((const float*)srcZ, (float*)midBuffer1, iw * pack, pack, pack, pack * srcUnit);
-                                    mSourceUnrollTransform((const float*)midBuffer1, (float*)dstZ, srcUnit * pack, unitStep, pack, unitStep * srcUnit);
+                                    mSourceUnrollTransform((const float*)srcZ, (float*)midBuffer1, iw * pack, pack, pack, pack * srcUnit); // midBuufer1存放(DB)^T
+                                    mSourceUnrollTransform((const float*)midBuffer1, (float*)dstZ, srcUnit * pack, unitStep, pack, unitStep * srcUnit); // ((DB)^T* B)^T
                                 }
                             } else {
-                                for (int z = 0; z < ic_4; ++z) {
+                                for (int z = 0; z < ic_4; ++z) { // pad区域置零
                                     // Extract
                                     auto srcZ = srcStart + z * sourceZStep * bytes;
                                     ::memset(midBuffer0, 0, mTransformMidBuffer->stride(1));
@@ -469,8 +496,9 @@ WinogradConfig ConvolutionPackWinograd::bestWinogradUnit(const Convolution2DComm
     auto kernelSize  = common->kernelY();
     int unit         = 0;
     float maxRate    = 0.0f;
+    // lms: naive 卷积消耗的乘法
     float originCost = (float)ow * oh * (2.0 * ic) * oc * kernelSize * kernelSize; // macs, with bias
-    std::set<int> supportSu{4, 6, 8};
+    std::set<int> supportSu{4, 6, 8}; // lms: 一次计算几个输出，即F(m,n)里的m
     CoreFunctions::WinoUnrollDestTransFunc destTransform[CONVOLUTION_WINOGRAD_MAX_UNIT + 1];
     for (int u = CONVOLUTION_WINOGRAD_MIN_UNIT; u <= maxUnit; ++u) {
         auto sui = u + kernelSize - 1;
@@ -479,7 +507,7 @@ WinogradConfig ConvolutionPackWinograd::bestWinogradUnit(const Convolution2DComm
             continue;
         }
         core->chooseWinoDestUnrollTransform(destTransform, CONVOLUTION_WINOGRAD_MAX_UNIT + 1, sui, u);
-            if (nullptr == destTransform[sui]) {
+        if (nullptr == destTransform[sui]) {
             continue;
         }
         // /*Let F(6,3) be choosed when it can speed up from F(2,3) than 0.6*/

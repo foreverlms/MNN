@@ -329,6 +329,7 @@ Session* Interpreter::createMultiPathSession(const std::vector<ScheduleConfig>& 
 }
 
 Session* Interpreter::createSession(const ScheduleConfig& config) {
+    MNN_PRINT("Create Session\n" );
     return createMultiPathSession({config});
 }
 

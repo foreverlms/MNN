@@ -36,6 +36,9 @@ void TFGraph::Finalize() {
     }
     for (auto& node : nodes_) {
         const NodeDef* node_def = node->node_def;
+        if (node_def->op() == "NoOp"){
+            int a = 10;
+        }
         for (int i = 0; i < node_def->input_size(); ++i) {
             const std::string& input = node_def->input(i);
             if (IsControlInput(input)) {
@@ -74,6 +77,10 @@ std::unique_ptr<MNN::SubGraphProtoT> TFGraph::ToProto() const {
         tempNode->opName = node->name;
         tempNode->opType = node->op;
         tempNode->tfNode = node->node_def;
+
+        if (node->op == "Conv2D"){
+            int a = 10;
+        }
 
         MNN::OpT *op = new MNN::OpT;
         auto creator = tfOpConverterSuit::get()->search(tempNode->opType);

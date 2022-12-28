@@ -178,7 +178,7 @@ WinogradGenerater::WinogradGenerater(std::vector<int> computeUnit, std::vector<i
         a[i + 1]  = sign * value * interp;
         sign *= -1;
     }
-    // Matrix::print(polyBuffer.get());
+     Matrix::print(polyBuffer.get(),"PolyBuffer");
     if (mUnitY > 1) {
         auto A = computeA(a, alpha, nY);
         Matrix::transpose(mA.get(), A.get());
@@ -187,10 +187,11 @@ WinogradGenerater::WinogradGenerater(std::vector<int> computeUnit, std::vector<i
         mA_Right = computeA(a, alpha, nX);
     }
     auto fdiag = computeFDiag(a, alpha);
-    // Matrix::print(fdiag.get());
+     Matrix::print(fdiag.get(), "Fdiag");
     if (mUnitY > 1) {
         auto A = computeA(a, alpha, rY);
         Matrix::transpose(mG.get(), A.get());
+
         if (dividedInG) {
             Matrix::divPerLine(mG.get(), mG.get(), fdiag.get());
         }

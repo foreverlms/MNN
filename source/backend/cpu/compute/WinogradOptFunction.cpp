@@ -800,9 +800,9 @@ static void _sourceUnrollTransformUnit4x4(const float* srcBlock, float* dstStart
 
 static void _sourceUnrollTransformUnit6x6(const float* srcBlock, float* dstStart, size_t srcRowStep, size_t dstRowStep, size_t srcStep, size_t dstStep) {
 
-    Vec4 two(2.f);
-    Vec4 four(4.f);
-    Vec4 five(5.f);
+//    Vec4 two(2.f);
+//    Vec4 four(4.f);
+//    Vec4 five(5.f);
     constexpr size_t srcUnit = 6; // srcUnit
     Vec4 buf0 = Vec4::load(srcBlock + 0 * srcStep);
     Vec4 buf1 = Vec4::load(srcBlock + 1 * srcStep);
@@ -1783,6 +1783,7 @@ void WinogradFunction::chooseWinoDestUnrollTransform(WinogradFunction::WinoUnrol
     };
 
     ::memset((void*)destFunctions, 0, maxUnit * sizeof(WinogradFunction::WinoUnrollDestTransFunc));
+    MNN_PRINT("k: %d, h: %d\n", k, h);
     if (8 == k && h > 1 && h < 8) {
         memcpy((void*)destFunctions, gDestTransUnit8[h], (8 + 1) * sizeof(WinogradFunction::WinoUnrollDestTransFunc));
         return;
