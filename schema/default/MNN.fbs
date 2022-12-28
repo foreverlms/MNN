@@ -138,6 +138,7 @@ enum OpType : int {
     OneHot,
     BroadcastTo,
     Dilation2D,
+    Interp3D,
     Raster = 128,
     ConvertTensor = 129,
     ArgMin = 130,
@@ -174,13 +175,13 @@ enum OpType : int {
     Broastcast,
     SetDiff1D,
     ReluGrad,
-    Relu6Grad,
+    Identity,
     PoolGrad,
     SoftmaxGrad,
     Conv2DBackPropFilter,
     TrainableParam,
     BatchNorm,
-
+    ConvTranspose3D,
     // Use for self defined grad
     ZeroGrad,
 

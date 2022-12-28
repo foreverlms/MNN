@@ -41,13 +41,17 @@ static EXPRP _transformConv3D(EXPRP expr) {
     auto& weightShape = weightInfo->dim;
 
     auto extraParam = expr->get()->main_as_Extra();
-
+    std::string originalOpType(extraParam->type()->c_str());
+    bool isDeconv = originalOpType == "ConvTranspose";
     int co    = weightShape[0];
     int ci    = weightShape[1];
     int depth = weightShape[2];
     int kh    = weightShape[3];
     int kw    = weightShape[4];
-
+    if (isDeconv) {
+        co = weightShape[1];
+        ci = weightShape[0];
+    }
     std::unique_ptr<Convolution3DT> conv3d(new MNN::Convolution3DT);
     const float* weightDataPtr = weight->readMap<float>();
     conv3d->weight.resize(weightInfo->size);
@@ -62,6 +66,7 @@ static EXPRP _transformConv3D(EXPRP expr) {
     conv3d->common.reset(new MNN::Convolution3DCommonT);
     auto common = conv3d->common.get();
     const int attrSize = extraParam->attr()->size();
+    std::vector<int> outputPadding;
     for (int i = 0; i < attrSize; ++i) {
         auto attr       = extraParam->attr()->GetAs<Attribute>(i);
         const auto& key = attr->key()->str();
@@ -77,17 +82,31 @@ static EXPRP _transformConv3D(EXPRP expr) {
             auto values     = attr->list()->i()->data();
             common->padMode = MNN::PadMode_CAFFE;
             common->pads    = std::vector<int>({values[0], values[1], values[2]});
+        } else if (key == "output_padding") {
+            // only valid in ConvTranspose
+            auto dataList  = attr->list();
+            const int size = dataList->i()->size();
+            for (int k = 0; k < size; ++k) {
+                outputPadding.push_back(dataList->i()->data()[k]);
+            }
         }
+        // TODO: Support outputshape
     }
+    common->outPads = outputPadding;
 
     common->relu = common->relu6 = false;
-    common->outputCount          = co;
-    common->inputCount           = ci * common->group;
+    if (isDeconv) {
+        common->outputCount = co * common->group; // deconv set inputCount to be ci, dw to be group
+        common->inputCount = ci;
+    } else {
+        common->outputCount = co;
+        common->inputCount  = ci * common->group; // conv set inputCount to be ci, dw to be group
+    }
     common->kernels              = std::vector<int>({depth, kh, kw});
 
     std::unique_ptr<OpT> newOp(new OpT);
     newOp->name       = expr->name();
-    newOp->type       = OpType_Convolution3D;
+    newOp->type       = isDeconv ? OpType_ConvTranspose3D : OpType_Convolution3D;
     newOp->main.type  = OpParameter_Convolution3D;
     newOp->main.value = conv3d.release();
 

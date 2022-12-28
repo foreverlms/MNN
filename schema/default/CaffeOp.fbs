@@ -37,6 +37,8 @@ table Convolution3DCommon {
     relu:bool = false;
     relu6:bool = false;
     group:int = 1;
+    outPads:[int];
+    hasOutputShape:bool = false;
 }
 
 enum SparseAlgo : byte {
@@ -320,7 +322,10 @@ table Interp {
     heightOffset:float;
     cubicCoeffA:float = -0.75;
     ctm:CoordinateTransformationMode = NotSet;
-}
+    depthScale:float;
+    outputDepth:int;
+    depthOffset:float;
+} 
 
 table Resize {
     xScale:float;

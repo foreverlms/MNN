@@ -82,6 +82,9 @@ CPURuntime::CPURuntime(const Backend::Info& info) {
         ThreadPool::active();
     }
 #endif
+#ifdef LOG_VERBOSE
+    MNN_PRINT("create CPURuntime:%p\n", this);
+#endif
 }
 CPURuntime:: ~ CPURuntime() {
 #ifdef MNN_USE_THREAD_POOL
@@ -96,6 +99,9 @@ float CPURuntime::onGetMemoryInMB() {
     return staticMemoryInMB;
 }
 
+
+
+
 Backend* CPURuntime::onCreate(const BackendConfig* config) const {
     auto precision = mPrecision;
     size_t flags = mFlags;
@@ -103,6 +109,10 @@ Backend* CPURuntime::onCreate(const BackendConfig* config) const {
         precision = config->precision;
         flags = config->flags;
     }
+#ifdef LOG_VERBOSE
+    MNN_PRINT("cpu backend was created by runtime:%p\n", this);
+#endif
+
 #ifdef MNN_USE_ARMV82
     auto core = MNNGetCoreFunctions();
     if (core->supportFp16arith && precision == BackendConfig::Precision_Low) {
@@ -110,7 +120,7 @@ Backend* CPURuntime::onCreate(const BackendConfig* config) const {
     }
 #endif
 #ifdef MNN_SUPPORT_BF16
-    if (precision == BackendConfig::Precision_Low && BF16Functions::get()) {
+    if (precision == BackendConfig::Precision_Low_BF16 && BF16Functions::get()) {
         return new BF16Backend(this);
     }
 #endif
@@ -122,6 +132,7 @@ Backend* CPURuntime::onCreate(const BackendConfig* config) const {
         return new AVX2Backend(this, flags);
     }
 #endif
+
     return new CPUBackend(this, precision, MNN_FORWARD_CPU, flags);
 }
 
@@ -147,6 +158,33 @@ int CPURuntime::onGetRuntimeStatus(RuntimeStatus statusEnum) const {
 void CPURuntime::onGabageCollect(int level) {
     mStaticAllocator->release(false);
 }
+
+
+void CPURuntime::onConcurrencyBegin() const {
+#ifdef MNN_USE_THREAD_POOL
+    if (mThreadNumber > 1 && mPower != BackendConfig::Power_High) {
+        mTaskIndex = ThreadPool::acquireWorkIndex();
+        if (mTaskIndex >= 0 ) {
+            ThreadPool::active();
+        }
+    }
+#else
+#ifdef _OPENMP
+    omp_set_dynamic(0);
+    omp_set_num_threads(mThreadNumber);
+#endif
+#endif
+}
+
+void CPURuntime::onConcurrencyEnd() const {
+#ifdef MNN_USE_THREAD_POOL
+    if (mTaskIndex >= 0 && mPower != BackendConfig::Power_High) {
+        ThreadPool::deactive();
+        ThreadPool::releaseWorkIndex(mTaskIndex);
+    }
+#endif
+}
+
 std::map<OpType, CPUBackend::Creator*>* CPUBackend::gCreator = nullptr;
 void CPUBackend::initCreatorMap() {
     gCreator = new std::map<OpType, CPUBackend::Creator*>;
@@ -163,7 +201,10 @@ bool CPUBackend::addCreator(OpType t, Creator* c) {
 }
 
 CPUBackend::CPUBackend(const CPURuntime* runtime, BackendConfig::PrecisionMode precision, MNNForwardType type, size_t flags) : Backend(type) {
-    mRuntime = runtime;
+#ifdef LOG_VERBOSE
+    MNN_PRINT("cpu backend create\n");
+#endif
+    mRuntime = const_cast<CPURuntime*>(runtime);
     std::shared_ptr<BufferAllocator::Allocator> defaultAlloc(BufferAllocator::Allocator::createRecurse(runtime->mStaticAllocator.get()));
     mDynamicAllocator.reset(new BufferAllocator(defaultAlloc));
     mStaticAllocator = runtime->mStaticAllocator;
@@ -178,24 +219,13 @@ CPUBackend::~CPUBackend() {
 }
 
 void CPUBackend::onExecuteBegin() const {
-#ifdef MNN_USE_THREAD_POOL
-    if (mRuntime->mTaskIndex >= 0 && mRuntime->mPower != BackendConfig::Power_High) {
-        ThreadPool::active();
-    }
-#else
-#ifdef _OPENMP
-    omp_set_dynamic(0);
-    omp_set_num_threads(threadNumber());
-#endif
-#endif
+    mRuntime->onConcurrencyBegin();
 }
+
 void CPUBackend::onExecuteEnd() const {
-#ifdef MNN_USE_THREAD_POOL
-    if (mRuntime->mTaskIndex >= 0 && mRuntime->mPower != BackendConfig::Power_High) {
-        ThreadPool::deactive();
-    }
-#endif
+    mRuntime->onConcurrencyEnd();
 }
+
 class CPUMemObj : public Backend::MemObj {
 public:
     CPUMemObj(BufferAllocator* allocator, std::pair<void*, int> points, int size) {
@@ -470,6 +500,9 @@ Execution* CPUBackend::onCreate(const std::vector<Tensor*>& inputs, const std::v
     }
     return exe;
 }
+const Runtime* CPUBackend::getRuntime() {
+    return mRuntime;
+}
 
 bool CPUBackend::onClearBuffer() {
     mCache->reset();
@@ -525,6 +558,16 @@ void CPUBackend::onCopyBuffer(const Tensor* srcTensor, const Tensor* dstTensor) 
             wrapTensor->setType(dstType);
         }
         wrapTensor->buffer().host = (uint8_t*)MNNMemoryAllocAlign(getTensorSize(wrapTensor.get()) * wrapTensor->getType().bytes(), MNN_MEMORY_ALIGN_DEFAULT);
+
+#ifdef LOG_VERBOSE
+        MNN_PRINT("CPU backend copy tensor ptr:%p -> ptr:%p hostPtr:%p -> %p, format %d -> %d, dims: [",
+        srcTensor, dstTensor, srcTensor->host<void>(), dstTensor->host<void>(), TensorUtils::getDescribe(srcTensor)->dimensionFormat, TensorUtils::getDescribe(dstTensor)->dimensionFormat);
+        for (int i=0; i<srcTensor->dimensions(); ++i) {
+            MNN_PRINT("%d ", srcTensor->length(i));
+        }
+        MNN_PRINT("]\n");
+#endif
+
         TensorUtils::getDescribe(wrapTensor.get())->memoryType = Tensor::InsideDescribe::MEMORY_HOST;
         auto code = CPUCastCreator::cast(srcTensor, wrapTensor.get(), this, convertType);
         if (NO_ERROR != code) {

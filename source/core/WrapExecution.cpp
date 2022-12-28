@@ -14,6 +14,8 @@
 #include "backend/cpu/CPUCast.hpp"
 #include "backend/cpu/compute/CommonOptFunction.h"
 
+// #define LOG_VERBOSE
+
 namespace MNN {
 bool WrapExecution::needWrap(const Tensor* input, Backend* curBackend) {
     auto curType = curBackend ? curBackend->type() : MNN_FORWARD_CPU;
@@ -87,10 +89,11 @@ Tensor* WrapExecution::copyConstCache(Tensor* t, Backend* curBackend, std::map<T
     return nullptr;
 }
 
-Tensor* WrapExecution::_getCopyTensor(Tensor* inputTensor) {
+Tensor* WrapExecution::_getCopyTensor(Tensor* inputTensor, Tensor* outsideInput) {
     auto dstBackend = mExecution->backend();
     auto inputDes   = TensorUtils::getDescribe(inputTensor);
     auto srcBackend = inputDes->backend;
+
     if (nullptr == srcBackend) {
         srcBackend = mCPUBackend;
     }
@@ -100,18 +103,28 @@ Tensor* WrapExecution::_getCopyTensor(Tensor* inputTensor) {
     if (srcBackend->type() == dstBackend->type()) {
         return inputTensor;
     }
+
     auto iter = mInputMaps.find(inputTensor);
     if (iter != mInputMaps.end()) {
         return std::get<2>(iter->second).get();
     }
+
+    auto tensorAddr = inputTensor->host<void*>();
+    auto tensorSize = inputTensor->size();
+
     // CPU -> XPU
     if (srcBackend->type() == mCPUBackend->type()) {
+
         std::shared_ptr<Tensor> wrapTensor(new Tensor);
         TensorUtils::copyShape(inputTensor, wrapTensor.get(), true);
         TensorUtils::adjustTensorForCompability(wrapTensor.get());
         wrapTensor->buffer().type = inputTensor->buffer().type;
         TensorUtils::getDescribe(wrapTensor.get())->quantAttr = TensorUtils::getDescribe(inputTensor)->quantAttr;
         mInputMaps.insert(std::make_pair(inputTensor, std::make_tuple(dstBackend, dstBackend, wrapTensor)));
+#ifdef LOG_VERBOSE
+        MNN_PRINT("match cpu to gpu, input:%p, host:%p, wrap:%p, host:%p. dst bn type:%d. outsideInput:%p, refcount:%d\n", inputTensor, inputTensor->host<void*>(), wrapTensor.get(), wrapTensor->host<void*>(), dstBackend->type(), outsideInput, TensorUtils::getDescribe(outsideInput)->useCount);
+#endif
+        TensorUtils::getDescribe(outsideInput)->useCount++;
         return wrapTensor.get();
     }
     // XPU -> CPU
@@ -122,6 +135,10 @@ Tensor* WrapExecution::_getCopyTensor(Tensor* inputTensor) {
         TensorUtils::adjustTensorForCompability(wrapTensor.get());
         TensorUtils::getDescribe(wrapTensor.get())->quantAttr = TensorUtils::getDescribe(inputTensor)->quantAttr;
         mInputMaps.insert(std::make_pair(inputTensor, std::make_tuple(mCPUBackend, srcBackend, wrapTensor)));
+        TensorUtils::getDescribe(outsideInput)->useCount++;
+#ifdef LOG_VERBOSE
+        MNN_PRINT("match gpu to cpu, input:%p, host:%p, wrap:%p, host:%p. src bn type:%d, outsideInput:%p, refcount:%d\n", inputTensor, inputTensor->host<void*>(), wrapTensor.get(), wrapTensor->host<void*>(), srcBackend->type(), outsideInput, TensorUtils::getDescribe(outsideInput)->useCount);
+#endif
         return wrapTensor.get();
     }
     // XPU -> CPU -> XPU'
@@ -137,6 +154,7 @@ Tensor* WrapExecution::_getCopyTensor(Tensor* inputTensor) {
     wrapTensor->buffer().type                        = inputTensor->buffer().type;
     mInputMaps.insert(std::make_pair(inputTensor, std::make_tuple(mCPUBackend, srcBackend, midTensor)));
     mInputMaps.insert(std::make_pair(midTensor.get(), std::make_tuple(dstBackend, dstBackend, wrapTensor)));
+
     return wrapTensor.get();
 }
 
@@ -158,13 +176,14 @@ ErrorCode WrapExecution::onResize(const std::vector<Tensor*>& inputs, const std:
             wrapDes->memoryType           = Tensor::InsideDescribe::MEMORY_VIRTUAL;
             wrapDes->regions              = des->regions;
             for (auto& r : wrapDes->regions) {
-                r.origin = _getCopyTensor(r.origin);
+                r.origin = _getCopyTensor(r.origin, inputTensor);
             }
             mWrapInputTensors[i] = mWrapForRaster.get();
         } else {
-            mWrapInputTensors[i] = _getCopyTensor(inputTensor);
+            mWrapInputTensors[i] = _getCopyTensor(inputTensor, inputTensor);
         }
     }
+
 
     for (int i = 0; i < outputs.size(); ++i) {
         MNN_ASSERT(TensorUtils::getDescribe(outputs[i])->backend == dstBackend);
@@ -177,7 +196,7 @@ ErrorCode WrapExecution::onResize(const std::vector<Tensor*>& inputs, const std:
         auto src       = iter.first;
         auto dst       = std::get<2>(iter.second).get();
 
-        if (TensorUtils::getDescribe(src)->usage == TensorUsage::CONSTANT && mStatic) {
+        if (TensorUtils::getDescribe(src)->usage == TensorUsage::CONSTANT && mStatic) { // copy constants
             auto srcDes = TensorUtils::getDescribe(src);
             memoryAllocSuccess = backend->onAcquireBuffer(dst, Backend::STATIC);
             if (memoryAllocSuccess) {
@@ -206,6 +225,7 @@ ErrorCode WrapExecution::onResize(const std::vector<Tensor*>& inputs, const std:
             backend->onReleaseBuffer(dst, Backend::DYNAMIC);
         }
     }
+
     return result;
 }
 

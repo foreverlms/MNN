@@ -658,6 +658,10 @@ static std::pair<bool, std::pair<ScheduleConfig, std::shared_ptr<BackendConfig>>
                     MNN_PRINT("MNN use low precision\n");
                     backendConfig->precision = MNN::BackendConfig::Precision_Low;
                 }
+                if (!obj_name.compare("Low_BF16")) {
+                    MNN_PRINT("MNN use lowBF precision\n");
+                    backendConfig->precision = MNN::BackendConfig::Precision_Low_BF16;
+                }
                 if (!obj_name.compare("high")) {
                     MNN_PRINT("MNN use high precision\n");
                     backendConfig->precision = MNN::BackendConfig::Precision_High;
@@ -1508,7 +1512,7 @@ static int PyMNNTensor_init(PyMNNTensor *self, PyObject *args, PyObject *kwds) {
             break;
         case 4:
             parse_res = PyArg_ParseTuple(args, "OOOl", &shape, &dataType, &data, &dimensionType)
-                        && isInts(shape) && isVals(data);
+                        && isInts(shape) && (isVals(data) || isInt(data));
             break;
         default:
             parse_res = false;
@@ -1518,7 +1522,7 @@ static int PyMNNTensor_init(PyMNNTensor *self, PyObject *args, PyObject *kwds) {
                         "\t0. (Var)\n"
                         "\t1. (Tensor/Var, DimensionType)\n"
                         "\t2. ([int], DataType, DimensionType)\n"
-                        "\t3. ([int], DataType, tuple/ndarray, DimensionType)\n");
+                        "\t3. ([int], DataType, ndarray/list/tuple/bytes/PyCapsule/int_addr, DimensionType)\n");
         return -1;
     }
 #ifdef PYMNN_EXPR_API
@@ -1589,7 +1593,7 @@ static int PyMNNTensor_init(PyMNNTensor *self, PyObject *args, PyObject *kwds) {
         dataSize *= i;
     }
     void *pData = NULL;
-    if (data && !PyCapsule_CheckExact(data)) {
+    if (data && !PyCapsule_CheckExact(data) && !isInt(data)) {
         if (PyBytes_Check(data)) {
             int64_t total_len = PyBytes_Size(data);
             if (dataSize * itemsize != total_len) {
@@ -1626,15 +1630,20 @@ static int PyMNNTensor_init(PyMNNTensor *self, PyObject *args, PyObject *kwds) {
         }
     } else {
         // no data input, set all zeros
-        // pycapsule input, copy data
+        // pycapsule/int_addr input, copy data
         pData = malloc(dataSize * itemsize);
-        if (data && PyCapsule_CheckExact(data)) {
-            auto src = PyCapsule_GetPointer(data, NULL);
-            if (src == nullptr) {
-                PyMNN_ERROR_LOG("PyMNNTensor_init: PyCapsule pointer is null.");
+        if (data) {
+            void* srcPtr = nullptr;
+            if (PyCapsule_CheckExact(data)) {
+                srcPtr = PyCapsule_GetPointer(data, NULL);
+            } else {
+                srcPtr = PyLong_AsVoidPtr(data);
+            }
+            if (srcPtr == nullptr) {
+                PyMNN_ERROR_LOG("PyMNNTensor_init: PyCapsule/int_addr pointer is null.");
                 return -1;
             }
-            memcpy(pData, src, dataSize * itemsize);
+            memcpy(pData, srcPtr, dataSize * itemsize);
         } else {
             memset(pData, 0, dataSize * itemsize);
         }
@@ -2187,12 +2196,22 @@ std::vector<CV::Point> toPoints(PyObject* obj) {
     }
     if (isVar(obj)) {
         auto vals = toVar(obj);
-        auto size = vals->getInfo()->size;
+        auto info = vals->getInfo();
+        auto size = info->size;
         MNN_ASSERT(size % 2 == 0);
         std::vector<CV::Point> points(size / 2);
-        auto ptr = vals->readMap<int>();
-        for (int i = 0; i < points.size(); i++) {
-            points[i].set(ptr[i*2], ptr[i*2+1]);
+        if (info->type == halide_type_of<float>()) {
+            auto ptr = vals->readMap<float>();
+            for (int i = 0; i < points.size(); i++) {
+                points[i].set(ptr[i*2], ptr[i*2+1]);
+            }
+        } else if (info->type == halide_type_of<int>()) {
+            auto ptr = vals->readMap<int>();
+            for (int i = 0; i < points.size(); i++) {
+                points[i].set(ptr[i*2], ptr[i*2+1]);
+            }
+        } else {
+            PyMNN_ERROR_LOG("Point data type must be int32 or float32.");
         }
         return points;
     }
@@ -2627,7 +2646,8 @@ PyMODINIT_FUNC MOD_INIT_FUNC(void) {
 #ifdef PYMNN_NUMPY_USABLE
     gNumpyValid = true;
     if(_import_array() < 0) {
-        PyErr_SetString(PyExc_Exception, "initMNN: init numpy failed");
+        MNN_PRINT("[Warnning] import numpy failed, please reinstall numpy!\n");
+        PyErr_Clear();
         gNumpyValid = false;
     }
 #endif
