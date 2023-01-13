@@ -636,6 +636,7 @@ IF (MNN_TENSORRT)
 ENDIF ()
 
 IF (MNN_SEP_BUILD)
+        message(WARNING "LMS: build here")
         add_library(MNN SHARED ${CMAKE_CURRENT_LIST_DIR}/cmake/dummy.cpp ${MNN_OBJECTS_TO_LINK} ${MNN_PUB_HDRS} ${MNN_EXPR_PUB_HDRS})
         target_link_libraries(MNN PUBLIC ${MNN_EXTRA_DEPENDS})
 ELSE ()

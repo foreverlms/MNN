@@ -32,6 +32,7 @@ std::shared_ptr<TFExtraManager::Transform> TFExtraManager::find(const std::strin
 }
 
 static auto gRegister = []() {
+    // TODO: lms 这里是Tensroflow算子在MNN中的额外转换
     auto extra = TFExtraManager::get();
     auto judge = [extra](EXPRP expr) {
         auto op = expr->get();
